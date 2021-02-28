@@ -1,0 +1,113 @@
+# BME280 datalogger
+# Writes a file showing readinds for each day that it runs. The file can be loaded into a spreadsheet 
+# BME280 library edit so units are omitted (for spreadsheet)
+# BME 280 library https://github.com/RuiSantosdotme/ESP-MicroPython/blob/master/code/WiFi/HTTP_Client_IFTTT_BME280/BME280.py
+# SDA = GP8    SCL = GP9
+from time import sleep
+import bme280
+import os
+from machine import Pin, I2C, Timer
+import utime
+#---------------------------------------------------------
+#RTC set fumction
+# input start time of clock in format YYYY MM DD HH MM SS
+time_input = ("2021 02 24 16 00 00")
+dateTime = (time_input)+' 0 0'
+givenTime = utime.mktime(list(map(int, tuple(dateTime.split(' ')))))
+
+ctime=utime.localtime(givenTime)
+
+# insert data  to RTC register
+
+setup_0 = (ctime[0] << 12) | (ctime[1] << 8) | ctime[2]
+setup_1 =  (ctime[3] << 16) | (ctime[4] << 8) | ctime[5]
+setup_1 =  setup_1 |  (((ctime[6] + 1) % 7) << 24)
+
+# register RTC address
+rtc_base_mem = 0x4005c000
+atomic_bitmask_set = 0x2000
+
+machine.mem32[rtc_base_mem + 4] = setup_0
+machine.mem32[rtc_base_mem + 8] = setup_1
+machine.mem8[rtc_base_mem + atomic_bitmask_set + 0xc] = 0x10
+#----------------------------------------------------------
+#Datalogger function
+#----------------------------------------------------------
+sda=machine.Pin(8)
+scl=machine.Pin(9)
+i2c=machine.I2C(0,sda=sda, scl=scl, freq=400000)
+
+
+#print(i2c.scan())
+for j in range(7):
+#for j in range(1): #for testing
+#Number of days the programme runs, 1 file written each day
+#Assign time elements    
+    (year,month,day,hour,minute,second,wday,yday)=utime.localtime(utime.time())
+    #create date variable
+    date = ("%02d-%02d-%d" % (day, month, year))
+    
+    file = open("readings.csv", "w")
+    #Write csv column headers
+    file.write("Start Date: ")
+    file.write(",")
+    file.write(date)
+    file.write("\n")
+    file.write("time")
+    file.write(",")
+    file.write("Temperature (C)")
+    file.write(",")
+    file.write("Humidity (%)")
+    file.write(",")
+    file.write("Pressure (hPa)")
+    file.write("\n")
+    
+    #for i in range(1): #Test
+    #24 hours one reading per hour
+    for i in range(24):
+    #Read bme280 values
+      bme = bme280.BME280(i2c=i2c)
+      temp = bme.temperature
+      hum = bme.humidity
+      pres = bme.pressure
+  # uncomment for temperature in Fahrenheit
+  #temp = (bme.read_temperature()/100) * (9/5) + 32
+  #temp = str(round(temp, 2)) + 'F'
+      
+      #Read time and set variable 'time'
+      (year,month,day,hour,minute,second,wday,yday)=utime.localtime(utime.time())
+      time = ("%02d:%02d:%02d" % (hour,minute,second))
+      #print out values (for testing)
+      #print('Time:        ', time)
+      #print('Temperature: ', temp, "Degrees C")
+      #print('Humidity:    ', hum, "%")
+      #print('Pressure:    ', pres, "hPa")
+      #print("")
+      
+      #write bme280 values and time to file buffer
+      file.write(str(time))
+      file.write(",")
+      file.write(str(temp))
+      file.write(",")
+      file.write(str(hum))
+      file.write(",")
+      file.write(str(pres))
+      file.write("\n")
+      #update file with buffer
+      file.flush()
+      #sleep(900) for readings every 15 minutes
+      sleep(3600) # for redings every hour
+      #1 hour in seconds
+#Rename file so that when you plug in the pico, the readings are not
+#overwritten
+    filename = "readings" + str(j) + ".csv"  
+    os.rename("readings.csv", filename)
+
+#Flash LED when readings complete
+led = Pin(25, Pin.OUT)
+tim = Timer()
+def tick(timer):
+  global led
+  led.toggle()
+
+tim.init(freq=3.5, mode=Timer.PERIODIC, callback=tick)
